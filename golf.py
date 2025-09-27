@@ -1,7 +1,6 @@
 import math
 import random
 from dataclasses import dataclass
-
 import pygame
 
 # --- Config ---
@@ -14,14 +13,23 @@ WHITE = (245, 245, 245)
 UI = (230, 230, 230)
 DARK = (18, 20, 22)
 SHADOW = (0, 0, 0)
-HOLE_R = 16
+
+HOLE_R = 16           # visual hole radius
+CUP_R = 16            # sink detection radius (cup)
+INNER_R = 12          # inner rim to snap quickly when very close
 BALL_R = 10
 
-FRICTION = 0.985           # per frame damping
-STOP_SPEED = 8.0           # speed below which we stop completely (pixels/sec)
-WALL_BOUNCE = 0.65         # energy kept when bouncing off walls
-MAX_POWER = 900.0          # pixels/sec
-AIM_MIN_DRAG = 6           # pixels before we show an arrow
+FRICTION = 0.985      # per-frame damping
+STOP_SPEED = 8.0      # px/s considered "stopped"
+WALL_BOUNCE = 0.65
+MAX_POWER = 900.0
+AIM_MIN_DRAG = 6
+
+# New: allow sinking when crossing the cup if not crazy fast
+MAX_SINK_SPEED = 600.0     # px/s
+# New: a soft “suction” toward the hole when nearby
+CUP_ATTRACT_RADIUS = 64.0  # start attracting when within this range
+CUP_ATTRACT = 240.0        # acceleration strength (px/s^2)
 
 random.seed(1)
 
@@ -41,16 +49,13 @@ class Ball:
 
 
 def draw_grass(surface: pygame.Surface):
-    """Simple procedural grass: subtle stripes + speckles."""
     surface.fill(GRASS)
-    # stripes
     stripe_h = 36
     for i in range(0, H, stripe_h):
         s = pygame.Surface((W, stripe_h))
         s.set_alpha(36)
         s.fill(GRASS_LIGHT)
         surface.blit(s, (0, i))
-    # speckles
     rng = random.Random(2)
     for _ in range(450):
         x = rng.randrange(W)
@@ -63,6 +68,24 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def seg_hits_circle(p0, p1, c, r) -> bool:
+    """
+    Return True if the segment p0->p1 intersects circle center c, radius r.
+    p0, p1, c are (x, y) tuples.
+    """
+    (x1, y1), (x2, y2) = p0, p1
+    cx, cy = c
+    dx, dy = x2 - x1, y2 - y1
+    if dx == dy == 0:
+        # segment is a point
+        return (x1 - cx) ** 2 + (y1 - cy) ** 2 <= r * r
+    # project center onto segment
+    t = ((cx - x1) * dx + (cy - y1) * dy) / (dx * dx + dy * dy)
+    t = clamp(t, 0.0, 1.0)
+    qx, qy = x1 + t * dx, y1 + t * dy
+    return (qx - cx) ** 2 + (qy - cy) ** 2 <= r * r
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((W, H))
@@ -71,11 +94,9 @@ def main():
     font = pygame.font.SysFont(None, 28)
     font_big = pygame.font.SysFont(None, 64)
 
-    # Static background
     grass = pygame.Surface((W, H))
     draw_grass(grass)
 
-    # Hole position and start
     hole = (int(W * 0.78), int(H * 0.28))
     start = (int(W * 0.18), int(H * 0.72))
 
@@ -95,6 +116,7 @@ def main():
     running = True
     while running:
         dt = clock.tick(FPS) / 1_000.0
+
         # --- Input ---
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
@@ -106,7 +128,6 @@ def main():
                     reset()
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and not sunk:
                 mx, my = ev.pos
-                # Only allow aiming when ball is still and click is on the ball
                 if ball.speed() < STOP_SPEED and ball.rect().collidepoint(mx, my):
                     aiming = True
                     drag_start = (mx, my)
@@ -116,9 +137,8 @@ def main():
                 dy = my - drag_start[1]
                 power = math.hypot(dx, dy)
                 if power > AIM_MIN_DRAG:
-                    # Launch opposite to drag direction
                     angle = math.atan2(dy, dx)
-                    speed = clamp(power * 10.0, 0, MAX_POWER)  # scale drag -> speed
+                    speed = clamp(power * 10.0, 0, MAX_POWER)
                     ball.vx = -math.cos(angle) * speed
                     ball.vy = -math.sin(angle) * speed
                     strokes += 1
@@ -126,6 +146,19 @@ def main():
 
         # --- Update physics ---
         if not sunk:
+            # remember previous position for continuous checks
+            prev = (ball.x, ball.y)
+
+            # gentle attraction when near the cup
+            dx = hole[0] - ball.x
+            dy = hole[1] - ball.y
+            dist = math.hypot(dx, dy)
+            if dist < CUP_ATTRACT_RADIUS and dist > 1e-6:
+                ax = (dx / dist) * CUP_ATTRACT
+                ay = (dy / dist) * CUP_ATTRACT
+                ball.vx += ax * dt
+                ball.vy += ay * dt
+
             # integrate
             ball.x += ball.vx * dt
             ball.y += ball.vy * dt
@@ -152,17 +185,24 @@ def main():
             if ball.speed() < STOP_SPEED:
                 ball.vx = ball.vy = 0.0
 
-            # sink check (ball close + slow)
-            dx = ball.x - hole[0]
-            dy = ball.y - hole[1]
-            d = math.hypot(dx, dy)
-            if d < HOLE_R - 2 and ball.speed() < STOP_SPEED * 0.6:
+            # --- Sink detection ---
+            # A) segment-circle hit during this frame (prevents tunneling)
+            crossed = seg_hits_circle(prev, (ball.x, ball.y), hole, CUP_R)
+            if crossed and ball.speed() <= MAX_SINK_SPEED:
+                ball.x, ball.y = hole
+                ball.vx = ball.vy = 0.0
                 sunk = True
+            else:
+                # B) current position very close AND slow: snap in
+                if dist < INNER_R and ball.speed() < STOP_SPEED * 1.2:
+                    ball.x, ball.y = hole
+                    ball.vx = ball.vy = 0.0
+                    sunk = True
 
         # --- Draw ---
         screen.blit(grass, (0, 0))
 
-        # hole: shadow and rim
+        # hole
         pygame.draw.circle(screen, SHADOW, hole, HOLE_R + 3)
         pygame.draw.circle(screen, DARK, hole, HOLE_R)
         pygame.draw.circle(screen, (70, 70, 70), hole, HOLE_R, 2)
@@ -174,12 +214,10 @@ def main():
             dy = my - drag_start[1]
             power = clamp(math.hypot(dx, dy), 0, MAX_POWER / 10.0)
             if power > AIM_MIN_DRAG:
-                # Arrow from ball to opposite of drag
                 ang = math.atan2(dy, dx)
                 ex = ball.x - math.cos(ang) * (power * 1.2)
                 ey = ball.y - math.sin(ang) * (power * 1.2)
                 pygame.draw.line(screen, UI, (ball.x, ball.y), (ex, ey), 3)
-                # power bar
                 bar_w, bar_h = 180, 10
                 bx, by = 20, 20
                 pygame.draw.rect(screen, (0, 0, 0), (bx - 2, by - 2, bar_w + 4, bar_h + 4), border_radius=6)
@@ -187,7 +225,7 @@ def main():
                 fill = int((power / (MAX_POWER / 10.0)) * bar_w)
                 pygame.draw.rect(screen, (220, 220, 220), (bx, by, fill, bar_h), border_radius=6)
 
-        # ball (with tiny shadow)
+        # ball + tiny shadow
         pygame.draw.circle(screen, (0, 0, 0), (int(ball.x + 2), int(ball.y + 2)), BALL_R, 0)
         pygame.draw.circle(screen, WHITE, (int(ball.x), int(ball.y)), BALL_R, 0)
 
@@ -195,7 +233,6 @@ def main():
         txt = font.render(f"Strokes: {strokes}   (R to reset)", True, UI)
         screen.blit(txt, (20, H - 36))
 
-        # Win banner
         if sunk:
             msg = f"🏁 Sunk in {strokes} stroke{'s' if strokes != 1 else ''}!"
             banner = font_big.render(msg, True, UI)
