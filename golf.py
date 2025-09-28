@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 import pygame
 
 # ---------- Window / World ----------
@@ -30,23 +30,87 @@ POWER_SCALE = 10.0          # pixels of drag -> speed
 MAX_POWER = 1800.0          # speed cap
 AIM_MIN_DRAG = 6.0
 
-# ---------- Level (edit these) ----------
-PLATFORMS: List[Tuple[int, int, int, int]] = [
-    (0, H - 60, W, 60),              # ground
-    (260, H - 180, 160, 20),         # ledge 1
-    (540, H - 260, 140, 20),         # ledge 2
-    (760, H - 120, 120, 20),         # near-hole ledge
-    (420, H - 120, 40, 100),         # vertical blocker
-]
-START_POS = (80, H - 90)
+# ---------------- Level Data ----------------
+# Each level has: platforms [(x,y,w,h)], start (x,y), hole_anchor_x
+LEVELS = [
+    {
+        "name": "Warm-up",
+        "platforms": [
+            (0, H - 60, W, 60),
+            (260, H - 180, 160, 20),
+            (540, H - 260, 140, 20),
+            (760, H - 120, 120, 20),
+            (420, H - 120, 40, 100),
+        ],
+        "start": (80, H - 90),
+        "hole_x": 820,
+    },
+    {
+        "name": "Over the Gap",
+        "platforms": [
+            (0, H - 60, 400, 60),
+            (560, H - 60, 440, 60),        # gap between 400..560
+            (250, H - 200, 120, 18),
+            (720, H - 220, 160, 18),
+            (460, H - 180, 40, 120),
+            (610, H - 140, 40, 80),
+        ],
+        "start": (100, H - 90),
+        "hole_x": 820,
+    },
 
-# Auto-place hole on a surface at this X
-HOLE_ANCHOR_X = 820
+    # --- NEW LEVEL 3 ---
+    {
+        "name": "Stairway",
+        "platforms": [
+            (0,   H - 60, W, 60),            # ground
+            (180, H - 160, 130, 18),
+            (340, H - 220, 130, 18),
+            (500, H - 280, 130, 18),
+            (660, H - 340, 130, 18),
+            (820, H - 200, 120, 18),         # final landing below
+            (430, H - 120, 40, 60),          # blocker under steps
+        ],
+        "start": (90, H - 90),
+        "hole_x": 690,                       # on the 4th “step”
+    },
+
+    # --- NEW LEVEL 4 ---
+    {
+        "name": "Cave Ceiling",
+        "platforms": [
+            (0,   H - 60, 360, 60),          # left ground
+            (640, H - 60, 360, 60),          # right ground
+            (360, H - 260, 280, 20),         # “ceiling” over the gap
+            (220, H - 170, 80, 18),          # small approach ledge
+            (700, H - 170, 80, 18),          # small landing ledge
+            (500, H - 120, 40, 120),         # tall pillar in the gap
+        ],
+        "start": (120, H - 90),
+        "hole_x": 700,                       # small landing ledge on right
+    },
+
+    # --- NEW LEVEL 5 ---
+    {
+        "name": "High Plateau",
+        "platforms": [
+            (0,   H - 60, W, 60),            # ground
+            (260, H - 260, 160, 18),
+            (480, H - 320, 160, 18),
+            (720, H - 240, 180, 18),         # high plateau near hole
+            (380, H - 140, 40, 80),          # blocker
+            (600, H - 180, 40, 120),         # blocker
+        ],
+        "start": (80, H - 90),
+        "hole_x": 790,                       # on the high plateau
+    },
+]
+
 HOLE_R = 18
 FLAG_HEIGHT = 70
 FLAG_LENGTH = 36
 
-# ---------------------------------------
+# --------------------------------------------------------
 
 @dataclass
 class Ball:
@@ -91,16 +155,14 @@ def integrate(ball: Ball, dt: float):
     ball.x += ball.vx * dt
     ball.y += ball.vy * dt
 
-def draw_level(screen: pygame.Surface):
-    # sky
+def draw_level(screen: pygame.Surface, platforms: List[Tuple[int,int,int,int]]):
     screen.fill(SKY)
-    # platforms (dirt + grass lip)
-    for (x, y, w, h) in PLATFORMS:
+    for (x, y, w, h) in platforms:
         pygame.draw.rect(screen, DIRT, (x, y, w, h))
         if h <= 60:
             pygame.draw.rect(screen, GRASS, (x, y - 8, w, 12))
 
-def predict_path(ball: Ball, vx0: float, vy0: float, steps=34, step_dt=1/30):
+def predict_path(ball: Ball, platforms, vx0: float, vy0: float, steps=34, step_dt=1/30):
     x, y = ball.x, ball.y
     vx, vy = vx0, vy0
     pts = []
@@ -114,35 +176,28 @@ def predict_path(ball: Ball, vx0: float, vy0: float, steps=34, step_dt=1/30):
         x += vx * step_dt
         y += vy * step_dt
         pts.append((x, y))
-        for (px, py, pw, ph) in PLATFORMS:
+        for (px, py, pw, ph) in platforms:
             if pygame.Rect(px, py, pw, ph).collidepoint(x, y + BALL_R):
                 return pts
     return pts
 
-def surface_y_at_x(x: float) -> int:
-    candidates = []
-    for (px, py, pw, ph) in PLATFORMS:
-        if px <= x <= px + pw:
-            candidates.append(py)
+def surface_y_at_x(platforms, x: float) -> int:
+    candidates = [py for (px, py, pw, ph) in platforms if px <= x <= px + pw]
     if candidates:
         return min(candidates)
-    return min(py for (_, py, _, _) in PLATFORMS)
+    # Fallback: highest (smallest y) surface among all
+    return min(py for (_, py, _, _) in platforms)
 
-def simulate_to_rest(ball: Ball, hole_pos, hole_r, stop_speed=STOP_SPEED) -> Tuple[Ball, bool]:
-    """
-    Offline-simulate physics until the ball settles (or sinks/falls), then return the predicted state.
-    Caps time and steps to avoid infinite loops.
-    """
+def simulate_to_rest(ball: Ball, platforms, hole_pos, hole_r, stop_speed=STOP_SPEED):
+    """Offline-simulate physics until the ball settles (or sinks/falls)."""
     b = ball.copy()
     sunk = False
-
-    # same computed hole surface for fairness
     hx, hy = hole_pos
 
-    SIM_DT = 1/300.0               # finer than render dt
-    MAX_SIM_TIME = 8.0             # seconds cap
+    SIM_DT = 1/300.0
+    MAX_SIM_TIME = 8.0
     MAX_STEPS = int(MAX_SIM_TIME / SIM_DT)
-    settled_frames_needed = int(0.15 / SIM_DT)  # require ~150ms of resting
+    settled_frames_needed = int(0.15 / SIM_DT)
 
     settled_counter = 0
 
@@ -150,15 +205,13 @@ def simulate_to_rest(ball: Ball, hole_pos, hole_r, stop_speed=STOP_SPEED) -> Tup
         b.on_ground = False
         integrate(b, SIM_DT)
 
-        # Collisions
         br = pygame.Rect(int(b.x - BALL_R), int(b.y - BALL_R), BALL_R*2, BALL_R*2)
-        for (x, y, w, h) in PLATFORMS:
+        for (x, y, w, h) in platforms:
             r = pygame.Rect(x, y, w, h)
             if r.colliderect(br):
                 circle_rect_resolve(b, r)
                 br = pygame.Rect(int(b.x - BALL_R), int(b.y - BALL_R), BALL_R*2, BALL_R*2)
 
-        # Bounds
         if b.x < BALL_R:
             b.x = BALL_R; b.vx = -b.vx * REST_BOUNCE
         if b.x > W - BALL_R:
@@ -166,16 +219,13 @@ def simulate_to_rest(ball: Ball, hole_pos, hole_r, stop_speed=STOP_SPEED) -> Tup
         if b.y < BALL_R:
             b.y = BALL_R; b.vy = -b.vy * REST_BOUNCE
         if b.y > H + 200:
-            # same behavior as game loop: reset
             return Ball(*START_POS), False
 
-        # Friction on ground
         if b.on_ground and b.speed() > 0:
             keep = pow(GROUND_FRICTION, SIM_DT)
             b.vx *= keep
             if abs(b.vy) < 10: b.vy = 0
 
-        # Sunk check
         dx = b.x - hx
         dy = b.y - hy
         if dx*dx + dy*dy <= (hole_r - 2)**2 and b.speed() < 320 and b.y >= hy - BALL_R - 2:
@@ -184,7 +234,6 @@ def simulate_to_rest(ball: Ball, hole_pos, hole_r, stop_speed=STOP_SPEED) -> Tup
             sunk = True
             break
 
-        # Settled?
         if b.on_ground and b.speed() < stop_speed:
             settled_counter += 1
             if settled_counter >= settled_frames_needed:
@@ -198,27 +247,55 @@ def simulate_to_rest(ball: Ball, hole_pos, hole_r, stop_speed=STOP_SPEED) -> Tup
 def main():
     pygame.init()
     screen = pygame.display.set_mode((W, H))
-    pygame.display.set_caption("Side-View Golf (Fast-Forward to Rest)")
+    pygame.display.set_caption("Side-View Golf — Multi-Level")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 26)
     big = pygame.font.SysFont(None, 54)
 
-    # Compute hole position ON the surface
-    hole_surface_y = surface_y_at_x(HOLE_ANCHOR_X)
-    HOLE_POS = (HOLE_ANCHOR_X, hole_surface_y)
+    level_index = 0
+
+    def load_level(i: int):
+        nonlocal level_index, PLATFORMS, START_POS, HOLE_POS, hole_surface_y
+        level_index = max(0, min(i, len(LEVELS)-1))
+        PLATFORMS = LEVELS[level_index]["platforms"]
+        START_POS = LEVELS[level_index]["start"]
+        hole_x = LEVELS[level_index]["hole_x"]
+        hole_surface_y = surface_y_at_x(PLATFORMS, hole_x)
+        HOLE_POS = (hole_x, hole_surface_y)
+        return PLATFORMS, START_POS, HOLE_POS, hole_surface_y
+
+    PLATFORMS: List[Tuple[int,int,int,int]]
+    START_POS: Tuple[int,int]
+    HOLE_POS: Tuple[int,int]
+    hole_surface_y: int
+    PLATFORMS, START_POS, HOLE_POS, hole_surface_y = load_level(level_index)
 
     ball = Ball(*START_POS)
     strokes = 0
     sunk = False
     aiming = False
     drag_start = (0, 0)
+    course_complete = False
 
-    def reset():
+    def reset_ball_only():
         nonlocal ball, strokes, sunk, aiming
         ball = Ball(*START_POS)
         strokes = 0
         sunk = False
         aiming = False
+
+    def next_level():
+        nonlocal course_complete
+        if level_index < len(LEVELS) - 1:
+            load_level(level_index + 1)
+            reset_ball_only()
+        else:
+            course_complete = True
+
+    def prev_level():
+        if level_index > 0:
+            load_level(level_index - 1)
+            reset_ball_only()
 
     running = True
     while running:
@@ -233,18 +310,23 @@ def main():
                 if e.key == pygame.K_ESCAPE:
                     running = False
                 elif e.key == pygame.K_r:
-                    reset()
+                    reset_ball_only()
                 elif e.key == pygame.K_f:
-                    # Fast-forward to where the ball will rest/sink
-                    predicted, will_sink = simulate_to_rest(ball, HOLE_POS, HOLE_R)
+                    predicted, will_sink = simulate_to_rest(ball, PLATFORMS, HOLE_POS, HOLE_R)
                     ball = predicted
                     sunk = sunk or will_sink
-            elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and not sunk:
+                elif e.key == pygame.K_n:   # manual next level
+                    next_level()
+                elif e.key == pygame.K_p:   # manual previous level
+                    prev_level()
+                elif e.key == pygame.K_RETURN and sunk and not course_complete:
+                    next_level()
+            elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and not sunk and not course_complete:
                 mx, my = e.pos
                 if ball.speed() < STOP_SPEED and ball.rect().collidepoint(mx, my):
                     aiming = True
                     drag_start = (mx, my)
-            elif e.type == pygame.MOUSEBUTTONUP and e.button == 1 and aiming and not sunk:
+            elif e.type == pygame.MOUSEBUTTONUP and e.button == 1 and aiming and not sunk and not course_complete:
                 mx, my = e.pos
                 dx, dy = mx - drag_start[0], my - drag_start[1]
                 power = min(MAX_POWER, math.hypot(dx, dy) * POWER_SCALE)
@@ -256,10 +338,9 @@ def main():
                 aiming = False
 
         # -------- Physics --------
-        if not sunk:
+        if not sunk and not course_complete:
             integrate(ball, dt)
 
-            # collide with platforms
             br = ball.rect()
             for (x, y, w, h) in PLATFORMS:
                 r = pygame.Rect(x, y, w, h)
@@ -267,16 +348,13 @@ def main():
                     circle_rect_resolve(ball, r)
                     br = ball.rect()
 
-            # ground friction if resting on a surface
             if ball.on_ground and ball.speed() > 0:
                 keep = pow(GROUND_FRICTION, dt)
                 ball.vx *= keep
                 if abs(ball.vy) < 10: ball.vy = 0
-
             if ball.on_ground and ball.speed() < STOP_SPEED:
                 ball.vx = ball.vy = 0
 
-            # world bounds
             if ball.x < BALL_R:
                 ball.x = BALL_R; ball.vx = -ball.vx * REST_BOUNCE
             if ball.x > W - BALL_R:
@@ -284,9 +362,9 @@ def main():
             if ball.y < BALL_R:
                 ball.y = BALL_R; ball.vy = -ball.vy * REST_BOUNCE
             if ball.y > H + 200:
-                reset()
+                reset_ball_only()
 
-            # Hole check (on-surface)
+            # Sink check (on-surface)
             dx = ball.x - HOLE_POS[0]
             dy = ball.y - HOLE_POS[1]
             near = (dx*dx + dy*dy) <= (HOLE_R - 2)**2
@@ -298,7 +376,7 @@ def main():
                 ball.x, ball.y = HOLE_POS
 
         # -------- Draw --------
-        draw_level(screen)
+        draw_level(screen, PLATFORMS)
 
         # hole + flag
         hx, hy = HOLE_POS
@@ -319,7 +397,7 @@ def main():
             power = min(MAX_POWER, math.hypot(dx, dy) * POWER_SCALE)
             ang = math.atan2(dy, dx)
             vx, vy = -math.cos(ang) * power, -math.sin(ang) * power
-            pts = predict_path(ball, vx, vy)
+            pts = predict_path(ball, PLATFORMS, vx, vy)
             for i, (px, py) in enumerate(pts[::2]):
                 a = max(60, 220 - i * 8)
                 s = max(2, 6 - i // 5)
@@ -333,11 +411,19 @@ def main():
         pygame.draw.circle(screen, WHITE, (int(ball.x), int(ball.y)), BALL_R)
 
         # UI
-        hud = font.render(f"Strokes: {strokes}  •  F: fast-forward  •  R: reset", True, UI)
+        title = LEVELS[level_index]["name"]
+        hud = font.render(f"Level {level_index+1}/{len(LEVELS)} — {title}  |  Strokes: {strokes}", True, UI)
         screen.blit(hud, (14, 12))
-        if sunk:
-            msg = big.render(f"🏁 Sunk in {strokes}!", True, UI)
-            screen.blit(msg, msg.get_rect(center=(W//2, 60)))
+        controls = font.render("Drag: aim  •  F: fast-forward  •  R: reset  •  N/P: next/prev  •  Enter: next when sunk", True, UI)
+        screen.blit(controls, (14, 40))
+
+        if sunk and not course_complete:
+            msg = big.render(f"🏁 Sunk in {strokes}! Press Enter for next level.", True, UI)
+            screen.blit(msg, msg.get_rect(center=(W//2, 90)))
+
+        if course_complete:
+            done = big.render("🎉 Course complete! Press P to revisit previous levels.", True, UI)
+            screen.blit(done, done.get_rect(center=(W//2, 90)))
 
         pygame.display.flip()
 
