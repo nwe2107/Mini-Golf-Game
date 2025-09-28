@@ -4,7 +4,7 @@ from typing import List, Tuple, Dict, Any
 import pygame
 
 # ---------- Window / World ----------
-W, H = 1000, 600        # window == world (no scrolling)
+W, H = 1000, 600
 FPS = 60
 
 # ---------- Colors ----------
@@ -16,23 +16,24 @@ DARK = (20, 24, 28)
 UI = (30, 30, 30)
 FLAG_RED = (220, 40, 40)
 POLE = (210, 210, 210)
+GATOR_GREEN = (28, 150, 86)
 
 # ---------- Physics ----------
-GRAVITY = 2000.0            # px/s^2 downward
-AIR_DRAG = 0.0008           # ~ v^2 drag
-GROUND_FRICTION = 0.82      # per-second keep factor
-REST_BOUNCE = 0.25          # bounciness on impacts
-STOP_SPEED = 40.0           # below = considered resting
+GRAVITY = 2000.0
+AIR_DRAG = 0.0008
+GROUND_FRICTION = 0.82
+REST_BOUNCE = 0.25
+STOP_SPEED = 40.0
 BALL_R = 12
 
 # Shot tuning
-POWER_SCALE = 10.0          # pixels of drag -> speed
-MAX_POWER = 1800.0          # speed cap
+POWER_SCALE = 10.0
+MAX_POWER = 1800.0
 AIM_MIN_DRAG = 6.0
 
-# ---------------- Level Data ----------------
-# Each level has: platforms [(x,y,w,h)], start (x,y), hole_anchor_x
-LEVELS = [
+# ---------- Level Data ----------
+# Add "gators": list of {x,y,w,h, period, phase, open_px}
+LEVELS: List[Dict[str, Any]] = [
     {
         "name": "Warm-up",
         "platforms": [
@@ -42,67 +43,74 @@ LEVELS = [
             (760, H - 120, 120, 20),
             (420, H - 120, 40, 100),
         ],
+        "gators": [],  # none here
         "start": (80, H - 90),
         "hole_x": 820,
     },
     {
-        "name": "Over the Gap",
+        "name": "Swamp Gap",
         "platforms": [
-            (0, H - 60, 400, 60),
-            (560, H - 60, 440, 60),        # gap between 400..560
-            (250, H - 200, 120, 18),
+            (0, H - 60, 370, 60),       # left ground
+            (630, H - 60, 370, 60),     # right ground (gap 370..630)
+            (260, H - 200, 120, 18),
             (720, H - 220, 160, 18),
-            (460, H - 180, 40, 120),
-            (610, H - 140, 40, 80),
+            (480, H - 120, 40, 60),     # pillar in the gap
+        ],
+        # Place a gator sitting in the gap (y just above the ground height)
+        "gators": [
+            {"x": 420, "y": H - 80, "w": 160, "h": 40, "period": 2.2, "phase": 0.0, "open_px": 26},
         ],
         "start": (100, H - 90),
-        "hole_x": 820,
+        "hole_x": 860,
     },
-
-    # --- NEW LEVEL 3 ---
     {
-        "name": "Stairway",
+        "name": "Twin Gators",
         "platforms": [
-            (0,   H - 60, W, 60),            # ground
-            (180, H - 160, 130, 18),
-            (340, H - 220, 130, 18),
-            (500, H - 280, 130, 18),
-            (660, H - 340, 130, 18),
-            (820, H - 200, 120, 18),         # final landing below
-            (430, H - 120, 40, 60),          # blocker under steps
+            (0, H - 60, W, 60),
+            (300, H - 180, 160, 18),
+            (540, H - 240, 140, 18),
+            (780, H - 160, 120, 18),
         ],
-        "start": (90, H - 90),
-        "hole_x": 690,                       # on the 4th “step”
-    },
-
-    # --- NEW LEVEL 4 ---
-    {
-        "name": "Cave Ceiling",
-        "platforms": [
-            (0,   H - 60, 360, 60),          # left ground
-            (640, H - 60, 360, 60),          # right ground
-            (360, H - 260, 280, 20),         # “ceiling” over the gap
-            (220, H - 170, 80, 18),          # small approach ledge
-            (700, H - 170, 80, 18),          # small landing ledge
-            (500, H - 120, 40, 120),         # tall pillar in the gap
-        ],
-        "start": (120, H - 90),
-        "hole_x": 700,                       # small landing ledge on right
-    },
-
-    # --- NEW LEVEL 5 ---
-    {
-        "name": "High Plateau",
-        "platforms": [
-            (0,   H - 60, W, 60),            # ground
-            (260, H - 260, 160, 18),
-            (480, H - 320, 160, 18),
-            (720, H - 240, 180, 18),         # high plateau near hole
-            (380, H - 140, 40, 80),          # blocker
-            (600, H - 180, 40, 120),         # blocker
+        "gators": [
+            {"x": 220, "y": H - 60 - 40, "w": 120, "h": 40, "period": 1.6, "phase": 0.0, "open_px": 24},
+            {"x": 560, "y": H - 60 - 40, "w": 120, "h": 40, "period": 1.9, "phase": 0.7, "open_px": 24},
         ],
         "start": (80, H - 90),
-        "hole_x": 790,                       # on the high plateau
+        "hole_x": 820,
+    },
+]
+
+# --- Append gator levels after the original 5 ---
+LEVELS += [
+    {
+        "name": "Swamp Gap",
+        "platforms": [
+            (0, H - 60, 370, 60),       # left ground
+            (630, H - 60, 370, 60),     # right ground (gap 370..630)
+            (260, H - 200, 120, 18),
+            (720, H - 220, 160, 18),
+            (480, H - 120, 40, 60),     # pillar in the gap
+        ],
+        "gators": [
+            {"x": 420, "y": H - 80, "w": 160, "h": 40, "period": 2.2, "phase": 0.0, "open_px": 26},
+        ],
+        "start": (100, H - 90),
+        "hole_x": 860,
+    },
+    {
+        "name": "Twin Gators",
+        "platforms": [
+            (0, H - 60, W, 60),
+            (300, H - 180, 160, 18),
+            (540, H - 240, 140, 18),
+            (780, H - 160, 120, 18),
+        ],
+        "gators": [
+            {"x": 220, "y": H - 100, "w": 120, "h": 40, "period": 1.6, "phase": 0.0, "open_px": 24},
+            {"x": 560, "y": H - 100, "w": 120, "h": 40, "period": 1.9, "phase": 0.7, "open_px": 24},
+        ],
+        "start": (80, H - 90),
+        "hole_x": 820,
     },
 ]
 
@@ -123,8 +131,36 @@ class Ball:
     def rect(self):  return pygame.Rect(int(self.x - BALL_R), int(self.y - BALL_R), BALL_R*2, BALL_R*2)
     def copy(self):  return Ball(self.x, self.y, self.vx, self.vy, self.on_ground)
 
+@dataclass
+class Gator:
+    x: int
+    y: int
+    w: int
+    h: int
+    period: float    # seconds for open/close cycle
+    phase: float     # 0..1 phase offset
+    open_px: int     # max mouth opening height (pixels)
+
+    def body_rect(self) -> pygame.Rect:
+        return pygame.Rect(self.x, self.y, self.w, self.h)
+
+    def open_amount(self, t: float) -> float:
+        # 0..1 via sine; stays open a bit longer near peak
+        return 0.5 * (1.0 + math.sin( (2*math.pi/self.period) * (t + self.phase*self.period) ))
+
+    def mouth_rect(self, t: float) -> pygame.Rect:
+        amt = self.open_amount(t)
+        mh = int(self.open_px * amt)
+        # Mouth opens upward from top edge of body
+        return pygame.Rect(self.x + int(self.w*0.15), self.y - mh, int(self.w*0.70), mh)
+
+def circle_rect_overlap(cx, cy, r, rect: pygame.Rect) -> bool:
+    qx = max(rect.left,  min(cx, rect.right))
+    qy = max(rect.top,   min(cy, rect.bottom))
+    dx, dy = cx - qx, cy - qy
+    return (dx*dx + dy*dy) <= r*r
+
 def circle_rect_resolve(ball: Ball, r: pygame.Rect):
-    """Resolve circle-rect overlap; push out along minimum axis and reflect velocity."""
     cx, cy, rad = ball.x, ball.y, BALL_R
     qx = max(r.left,  min(cx, r.right))
     qy = max(r.top,   min(cy, r.bottom))
@@ -162,6 +198,25 @@ def draw_level(screen: pygame.Surface, platforms: List[Tuple[int,int,int,int]]):
         if h <= 60:
             pygame.draw.rect(screen, GRASS, (x, y - 8, w, 12))
 
+def draw_gator(screen: pygame.Surface, g: Gator, t: float):
+    # body
+    body = g.body_rect()
+    pygame.draw.rect(screen, GATOR_GREEN, body, border_radius=8)
+    # back hump
+    pygame.draw.ellipse(screen, GATOR_GREEN, (body.x - 10, body.y - 16, body.w + 20, 24))
+    # mouth (open upward)
+    mouth = g.mouth_rect(t)
+    if mouth.height > 2:
+        # mouth cavity
+        pygame.draw.rect(screen, (10, 10, 16), mouth)
+        # teeth (triangles) along mouth edge
+        tooth_w = 10
+        for i in range(mouth.x, mouth.right, tooth_w):
+            pts = [(i, mouth.y),
+                   (min(i+tooth_w, mouth.right), mouth.y),
+                   (i + tooth_w//2, mouth.y + 10)]
+            pygame.draw.polygon(screen, WHITE, pts)
+
 def predict_path(ball: Ball, platforms, vx0: float, vy0: float, steps=34, step_dt=1/30):
     x, y = ball.x, ball.y
     vx, vy = vx0, vy0
@@ -185,21 +240,29 @@ def surface_y_at_x(platforms, x: float) -> int:
     candidates = [py for (px, py, pw, ph) in platforms if px <= x <= px + pw]
     if candidates:
         return min(candidates)
-    # Fallback: highest (smallest y) surface among all
     return min(py for (_, py, _, _) in platforms)
 
-def simulate_to_rest(ball: Ball, platforms, hole_pos, hole_r, stop_speed=STOP_SPEED):
-    """Offline-simulate physics until the ball settles (or sinks/falls)."""
+def simulate_to_rest(ball: Ball, platforms, hole_pos, hole_r, gators: List[Gator], stop_speed=STOP_SPEED):
+    """
+    Offline-simulate physics until the ball settles (or sinks/falls/eaten).
+    Approximation: treat gator mouth area as always hazardous during prediction,
+    so fast-forward won't skip through a mouth that would open soon.
+    """
     b = ball.copy()
     sunk = False
-    hx, hy = hole_pos
 
+    hx, hy = hole_pos
     SIM_DT = 1/300.0
     MAX_SIM_TIME = 8.0
     MAX_STEPS = int(MAX_SIM_TIME / SIM_DT)
     settled_frames_needed = int(0.15 / SIM_DT)
-
     settled_counter = 0
+
+    # Build static hazard rects from gators' max mouth extent
+    hazard_rects = []
+    for g in gators:
+        max_mouth = pygame.Rect(g.x + int(g.w*0.15), g.y - g.open_px, int(g.w*0.70), g.open_px)
+        hazard_rects.append(max_mouth)
 
     for _ in range(MAX_STEPS):
         b.on_ground = False
@@ -211,6 +274,11 @@ def simulate_to_rest(ball: Ball, platforms, hole_pos, hole_r, stop_speed=STOP_SP
             if r.colliderect(br):
                 circle_rect_resolve(b, r)
                 br = pygame.Rect(int(b.x - BALL_R), int(b.y - BALL_R), BALL_R*2, BALL_R*2)
+
+        # hazard check (approx)
+        for hz in hazard_rects:
+            if circle_rect_overlap(b.x, b.y, BALL_R, hz):
+                return Ball(*START_POS), False  # treated as eaten → reset
 
         if b.x < BALL_R:
             b.x = BALL_R; b.vx = -b.vx * REST_BOUNCE
@@ -247,28 +315,33 @@ def simulate_to_rest(ball: Ball, platforms, hole_pos, hole_r, stop_speed=STOP_SP
 def main():
     pygame.init()
     screen = pygame.display.set_mode((W, H))
-    pygame.display.set_caption("Side-View Golf — Multi-Level")
+    pygame.display.set_caption("Side-View Golf — Gators!")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 26)
     big = pygame.font.SysFont(None, 54)
 
     level_index = 0
 
-    def load_level(i: int):
-        nonlocal level_index, PLATFORMS, START_POS, HOLE_POS, hole_surface_y
-        level_index = max(0, min(i, len(LEVELS)-1))
-        PLATFORMS = LEVELS[level_index]["platforms"]
-        START_POS = LEVELS[level_index]["start"]
-        hole_x = LEVELS[level_index]["hole_x"]
-        hole_surface_y = surface_y_at_x(PLATFORMS, hole_x)
-        HOLE_POS = (hole_x, hole_surface_y)
-        return PLATFORMS, START_POS, HOLE_POS, hole_surface_y
-
+    # Filled by load_level()
     PLATFORMS: List[Tuple[int,int,int,int]]
     START_POS: Tuple[int,int]
     HOLE_POS: Tuple[int,int]
     hole_surface_y: int
-    PLATFORMS, START_POS, HOLE_POS, hole_surface_y = load_level(level_index)
+    GATORS: List[Gator]
+
+    def load_level(i: int):
+        nonlocal level_index, PLATFORMS, START_POS, HOLE_POS, hole_surface_y, GATORS
+        level_index = max(0, min(i, len(LEVELS)-1))
+        data = LEVELS[level_index]
+        PLATFORMS = data["platforms"]
+        START_POS = data["start"]
+        hx = data["hole_x"]
+        hole_surface_y = surface_y_at_x(PLATFORMS, hx)
+        HOLE_POS = (hx, hole_surface_y)
+        GATORS = [Gator(**g) for g in data.get("gators", [])]
+        return PLATFORMS, START_POS, HOLE_POS, hole_surface_y, GATORS
+
+    PLATFORMS, START_POS, HOLE_POS, hole_surface_y, GATORS = load_level(level_index)
 
     ball = Ball(*START_POS)
     strokes = 0
@@ -276,30 +349,43 @@ def main():
     aiming = False
     drag_start = (0, 0)
     course_complete = False
+    chomp_timer = 0.0   # seconds to display chomp message
 
-    def reset_ball_only():
-        nonlocal ball, strokes, sunk, aiming
+    def reset_ball_only(penalize=False):
+        nonlocal ball, strokes, sunk, aiming, chomp_timer
+        if penalize:
+            strokes += 1  # penalty stroke
+            chomp_timer = 1.2
         ball = Ball(*START_POS)
-        strokes = 0
         sunk = False
         aiming = False
 
     def next_level():
-        nonlocal course_complete
+        nonlocal course_complete, ball, strokes, sunk, aiming
         if level_index < len(LEVELS) - 1:
             load_level(level_index + 1)
-            reset_ball_only()
+            ball = Ball(*START_POS)
+            strokes = 0
+            sunk = False
+            aiming = False
         else:
             course_complete = True
 
     def prev_level():
+        nonlocal ball, strokes, sunk, aiming
         if level_index > 0:
             load_level(level_index - 1)
-            reset_ball_only()
+            ball = Ball(*START_POS)
+            strokes = 0
+            sunk = False
+            aiming = False
 
     running = True
     while running:
         dt = clock.tick(FPS) / 1000.0
+        tsec = pygame.time.get_ticks() / 1000.0
+        if chomp_timer > 0:
+            chomp_timer -= dt
         ball.on_ground = False
 
         # -------- Input --------
@@ -312,12 +398,12 @@ def main():
                 elif e.key == pygame.K_r:
                     reset_ball_only()
                 elif e.key == pygame.K_f:
-                    predicted, will_sink = simulate_to_rest(ball, PLATFORMS, HOLE_POS, HOLE_R)
+                    predicted, will_sink = simulate_to_rest(ball, PLATFORMS, HOLE_POS, HOLE_R, GATORS)
                     ball = predicted
                     sunk = sunk or will_sink
-                elif e.key == pygame.K_n:   # manual next level
+                elif e.key == pygame.K_n:
                     next_level()
-                elif e.key == pygame.K_p:   # manual previous level
+                elif e.key == pygame.K_p:
                     prev_level()
                 elif e.key == pygame.K_RETURN and sunk and not course_complete:
                     next_level()
@@ -341,6 +427,7 @@ def main():
         if not sunk and not course_complete:
             integrate(ball, dt)
 
+            # platforms
             br = ball.rect()
             for (x, y, w, h) in PLATFORMS:
                 r = pygame.Rect(x, y, w, h)
@@ -348,6 +435,14 @@ def main():
                     circle_rect_resolve(ball, r)
                     br = ball.rect()
 
+            # gator hazard (only when mouth is fairly open)
+            for g in GATORS:
+                mouth = g.mouth_rect(tsec)
+                if g.open_amount(tsec) > 0.6 and circle_rect_overlap(ball.x, ball.y, BALL_R, mouth):
+                    reset_ball_only(penalize=True)
+                    break  # stop checking others this frame
+
+            # friction
             if ball.on_ground and ball.speed() > 0:
                 keep = pow(GROUND_FRICTION, dt)
                 ball.vx *= keep
@@ -355,6 +450,7 @@ def main():
             if ball.on_ground and ball.speed() < STOP_SPEED:
                 ball.vx = ball.vy = 0
 
+            # world bounds
             if ball.x < BALL_R:
                 ball.x = BALL_R; ball.vx = -ball.vx * REST_BOUNCE
             if ball.x > W - BALL_R:
@@ -364,7 +460,7 @@ def main():
             if ball.y > H + 200:
                 reset_ball_only()
 
-            # Sink check (on-surface)
+            # sink check (on-surface)
             dx = ball.x - HOLE_POS[0]
             dy = ball.y - HOLE_POS[1]
             near = (dx*dx + dy*dy) <= (HOLE_R - 2)**2
@@ -377,6 +473,10 @@ def main():
 
         # -------- Draw --------
         draw_level(screen, PLATFORMS)
+
+        # draw gators
+        for g in GATORS:
+            draw_gator(screen, g, tsec)
 
         # hole + flag
         hx, hy = HOLE_POS
@@ -414,12 +514,15 @@ def main():
         title = LEVELS[level_index]["name"]
         hud = font.render(f"Level {level_index+1}/{len(LEVELS)} — {title}  |  Strokes: {strokes}", True, UI)
         screen.blit(hud, (14, 12))
-        controls = font.render("Drag: aim  •  F: fast-forward  •  R: reset  •  N/P: next/prev  •  Enter: next when sunk", True, UI)
+        controls = font.render("Drag aim • F fast-forward • R reset • N/P next/prev • Enter next when sunk", True, UI)
         screen.blit(controls, (14, 40))
+        if chomp_timer > 0:
+            msg = big.render("CHOMP!  +1 penalty", True, (200, 30, 30))
+            screen.blit(msg, msg.get_rect(center=(W//2, 90)))
 
         if sunk and not course_complete:
             msg = big.render(f"🏁 Sunk in {strokes}! Press Enter for next level.", True, UI)
-            screen.blit(msg, msg.get_rect(center=(W//2, 90)))
+            screen.blit(msg, msg.get_rect(center=(W//2, 130)))
 
         if course_complete:
             done = big.render("🎉 Course complete! Press P to revisit previous levels.", True, UI)
